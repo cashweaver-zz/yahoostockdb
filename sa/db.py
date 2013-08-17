@@ -26,6 +26,7 @@ last_week = now - datetime.timedelta(days=7)
 last_week = last_week.strftime("%Y-%m-%d")
 
 def update_symbol(symbol, lrd, db_path):
+    """Update a single symbol"""
     symbol = symbol.upper()
     # connect to db
     con = lite.connect(db_path)
@@ -51,17 +52,20 @@ def update_symbol(symbol, lrd, db_path):
             add_symbol(con, symbol, db_path)
 
 def table_exists(con, t_name):
+    """Check if table exists. Returns true/false"""
     cur = con.cursor()
     cur.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='%s'" % (t_name))
     return cur.fetchone()
 
 def update_db(symbol_list=default_symbol_list, db_path=default_db_path):
+    """Loops over symbol_list and calls update_symbol() for each"""
     logging.info("Updating database...")
     lrd = get_latest_remote_date()
     for symbol in open(symbol_list, 'r').readlines():
         update_symbol(symbol.rstrip(), lrd, db_path)
 
 def init_db(symbol_list=default_symbol_list, db_path=default_db_path):
+    """Loops over symbol_list and calls drop_and_add_symbol() for each"""
     logging.info("Initializing database...")
     con = lite.connect(db_path)
     with con:
@@ -71,6 +75,7 @@ def init_db(symbol_list=default_symbol_list, db_path=default_db_path):
             logging.info("%s\t| initialized" % (symbol))
 
 def drop_and_add_symbol(con, symbol, db_path, sdate='1900-01-01', edate=today):
+    """DELETE TABLE IF EXISTS, CREATE TABLE, then fill it with fresh Yahoo data"""
     # TODO: add sterilization for
     #   sdate
     #   edate
@@ -90,6 +95,7 @@ def drop_and_add_symbol(con, symbol, db_path, sdate='1900-01-01', edate=today):
 
 
 def add_symbol(con, symbol, db_path, sdate='1900-01-01', edate=today):
+    """CREATE TABLE IF NOT EXISTS, then fill it with fresh Yahoo data"""
     # TODO: add sterilization for
     #   sdate
     #   edate
@@ -107,6 +113,7 @@ def add_symbol(con, symbol, db_path, sdate='1900-01-01', edate=today):
         cur.executemany("INSERT INTO %s VALUES(?, ?, ?, ?, ?, ?, ?)" % (symbol), (hist_data))
 
 def get_latest_local_date(con, symbol, db_path=default_db_path):
+    """Returns the Date field of the 'last' row for a given symbol"""
     symbol = symbol.upper()
     # connect to db
     with con:
@@ -115,16 +122,8 @@ def get_latest_local_date(con, symbol, db_path=default_db_path):
         return cur.fetchone()[0]
 
 def get_latest_remote_date(symbol="GOOG"):
+    """Checks yahoo for the latest data date"""
     # assumes that the most recent remote date will be in the last week
     hist_data = ysq.get_historical_prices(symbol, last_week, today)
     hist_data.pop(0)
     return hist_data[0][0]
-
-
-
-
-
-
-
-
-
