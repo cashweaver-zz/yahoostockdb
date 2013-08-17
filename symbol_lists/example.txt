@@ -1,3 +1,4 @@
 GOOG
 YHOO
 MSFT
+ATVI

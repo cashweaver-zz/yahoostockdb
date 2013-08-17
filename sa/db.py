@@ -34,6 +34,18 @@ def update_symbol(symbol, lrd, db_path):
             lld = get_latest_local_date(con, symbol)
             if lld == lrd:
                 logging.info("%s\t| Up to date" % (symbol))
+            else:
+                cur = con.cursor()
+                hist_data = ysq.get_historical_prices(symbol, lld, today)
+                # remove the headers
+                hist_data.pop(0)
+                # reverse order is much simpler for generating the technical indicators
+                hist_data.reverse()
+                # hist_data includes data from lld, which we already have
+                # it's the oldest data, so we can pop it off the top
+                hist_data.pop(0)
+                cur.executemany("INSERT INTO %s VALUES(?, ?, ?, ?, ?, ?, ?)" % (symbol), (hist_data))
+                logging.info("%s\t| Updated" % (symbol))
         else:
             logging.info("%s\t| No table found, creating and updating..." % (symbol))
             add_symbol(con, symbol, db_path)
