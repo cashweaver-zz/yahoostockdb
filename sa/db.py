@@ -24,6 +24,7 @@ now = datetime.datetime.now()
 today = now.strftime("%Y-%m-%d")
 last_week = now - datetime.timedelta(days=7)
 last_week = last_week.strftime("%Y-%m-%d")
+the_beginning = "1900-01-01"
 
 def update_symbol(symbol, lrd, db_path):
     """Update a single symbol"""
@@ -36,20 +37,11 @@ def update_symbol(symbol, lrd, db_path):
             if lld == lrd:
                 logging.info("%s\t| Up to date" % (symbol))
             else:
-                cur = con.cursor()
-                hist_data = ysq.get_historical_prices(symbol, lld, today)
-                # remove the headers
-                hist_data.pop(0)
-                # reverse order is much simpler for generating the technical indicators
-                hist_data.reverse()
-                # hist_data includes data from lld, which we already have
-                # it's the oldest data, so we can pop it off the top
-                hist_data.pop(0)
-                cur.executemany("INSERT INTO %s VALUES(?, ?, ?, ?, ?, ?, ?)" % (symbol), (hist_data))
+                insert_yahoo_data(con, symbol, lld, today, True)
                 logging.info("%s\t| Updated" % (symbol))
         else:
             logging.info("%s\t| No table found, creating and updating..." % (symbol))
-            add_symbol(con, symbol, db_path)
+            init_symbol(con, symbol, db_path)
 
 def table_exists(con, t_name):
     """Check if table exists. Returns true/false"""
@@ -65,52 +57,35 @@ def update_db(symbol_list=default_symbol_list, db_path=default_db_path):
         update_symbol(symbol.rstrip(), lrd, db_path)
 
 def init_db(symbol_list=default_symbol_list, db_path=default_db_path):
-    """Loops over symbol_list and calls drop_and_add_symbol() for each"""
+    """Loops over symbol_list and calls init_symbol() for each"""
     logging.info("Initializing database...")
     con = lite.connect(db_path)
     with con:
         for symbol in open(symbol_list, 'r').readlines():
             symbol = symbol.rstrip()
-            drop_and_add_symbol(con, symbol, db_path)
+            init_symbol(con, symbol, db_path)
             logging.info("%s\t| initialized" % (symbol))
 
-def drop_and_add_symbol(con, symbol, db_path, sdate='1900-01-01', edate=today):
-    """DELETE TABLE IF EXISTS, CREATE TABLE, then fill it with fresh Yahoo data"""
-    # TODO: add sterilization for
-    #   sdate
-    #   edate
-    symbol = symbol.upper()
-    with con:
-        cur = con.cursor()
-        # TODO change to only extend existing tables, not overwrite them
-        cur.execute("DROP TABLE IF EXISTS %s" % (symbol))
-        cur.execute("CREATE TABLE %s(Date TEXT, Open REAL, High REAL, Low REAL, Close REAL, Volume INT, AdjClose REAL)" % (symbol))
-        # TODO: sterilize sdate and edate
-        hist_data = ysq.get_historical_prices(symbol, sdate, edate)
-        # remove the headers
-        hist_data.pop(0)
-        # reverse order is much simpler for generating the technical indicators
-        hist_data.reverse()
-        cur.executemany("INSERT INTO %s VALUES(?, ?, ?, ?, ?, ?, ?)" % (symbol), (hist_data))
-
-
-def add_symbol(con, symbol, db_path, sdate='1900-01-01', edate=today):
+def init_symbol(con, symbol, db_path):
     """CREATE TABLE IF NOT EXISTS, then fill it with fresh Yahoo data"""
-    # TODO: add sterilization for
-    #   sdate
-    #   edate
     symbol = symbol.upper()
     with con:
-        cur = con.cursor()
-        # TODO change to only extend existing tables, not overwrite them
-        cur.execute("CREATE TABLE IF NOT EXISTS %s(Date TEXT, Open REAL, High REAL, Low REAL, Close REAL, Volume INT, AdjClose REAL)" % (symbol))
-        # TODO: sterilize sdate and edate
-        hist_data = ysq.get_historical_prices(symbol, sdate, edate)
-        # remove the headers
+        insert_yahoo_data(con, symbol, the_beginning, today)
+
+def insert_yahoo_data(con, symbol, sdate, edate, update=False):
+    """Insert yahoo data into table"""
+    cur = con.cursor()
+    # TODO: sterilize sdate and edate
+    hist_data = ysq.get_historical_prices(symbol, sdate, edate)
+    # remove the headers
+    hist_data.pop(0)
+    # reverse order is much simpler for generating the technical indicators
+    hist_data.reverse()
+    if update:
+        # hist_data includes data from lld, which we already have
+        # it's the oldest data, so we can pop it off the top
         hist_data.pop(0)
-        # reverse order is much simpler for generating the technical indicators
-        hist_data.reverse()
-        cur.executemany("INSERT INTO %s VALUES(?, ?, ?, ?, ?, ?, ?)" % (symbol), (hist_data))
+    cur.executemany("INSERT INTO %s VALUES(?, ?, ?, ?, ?, ?, ?)" % (symbol), (hist_data))
 
 def get_latest_local_date(con, symbol, db_path=default_db_path):
     """Returns the Date field of the 'last' row for a given symbol"""

@@ -3,6 +3,5 @@
 
 import sa.db as sadb
 
-#sadb.add_symbol('GOOG')
-#sadb.update_symbol('GOOG')
 sadb.update_db()
+#sadb.init_db()
