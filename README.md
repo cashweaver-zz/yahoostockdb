@@ -1,13 +1,15 @@
 stock_analyzer
-=======
+==============
 
 Python based stock analysis
 
-## Installing
+Installation
+============
 
 This guide was written for Ubuntu 12.04. Your mileage may vary.
 
-### Required Libraries
+Dependencies
+------------
 
 All the commands line by line:
 

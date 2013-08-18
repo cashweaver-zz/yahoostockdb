@@ -4,4 +4,3 @@
 import sa.db as sadb
 
 sadb.update_db()
-#sadb.init_db()

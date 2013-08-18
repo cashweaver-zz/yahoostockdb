@@ -9,11 +9,13 @@ import logging
 import os
 import sys
 import configparser
+import urllib2
 
 config = configparser.ConfigParser()
 config.read(os.getcwd()+"/config.ini")
 symbol_list = config['DATABASE']['symbol_list']
 db_path = config['DATABASE']['db_path']
+conn_test_ip = config['DATABASE']['conn_test_ip']
 
 # set up logging
 logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
@@ -41,27 +43,45 @@ cols_ta = "Rsi14 REAL, " + \
 update_count = 0
 
 def update_db(symbol_list=symbol_list, db_path=db_path):
-    logging.info("Updating database...")
-    lrd = get_latest_remote_date()
-    for symbol in open(symbol_list, 'r').readlines():
-        update_symbol(symbol.rstrip(), lrd, db_path)
+    logging.info("Checking for internet connection...")
+    if internet_on():
+        logging.info("Connection found. Continuing...")
+        try:
+            logging.info("Updating database...")
+            logging.info("%7s| Status" % "Symbol")
+            logging.info("======================")
+            con = lite.connect(db_path)
+            with con:
+                for symbol in open(symbol_list, 'r').readlines():
+                    update_symbol(con, symbol.rstrip().upper(), db_path)
+        except lite.Error, e:
+            logging.critical("Error: %s: " % e.args[0])
+            sys.exit(1)
+        finally:
+            if con:
+                con.close()
+    else:
+        logging.critical("Could not connect to google.com via [74.125.113.99]. Conclusion:  You're not connected to the internet. Either that or google.com is down. 2013-08-17 Never Forget.")
 
-def update_symbol(symbol, lrd, db_path):
-    symbol = symbol.upper()
-    # connect to db
-    con = lite.connect(db_path)
-    with con:
+def update_symbol(con, symbol, db_path):
+    lrd = get_latest_remote_date(symbol)
+    # check that Yahoo has data for given symbol
+    if not lrd == "":
         if table_exists(con, symbol+"_HIST"):
             lld = get_latest_local_date(con, symbol)
             if lld == lrd:
-                logging.info("%s\t| Up to date" % (symbol))
+                logging.info("%9s| Up to date" % (symbol))
             else:
                 update_tables(con, symbol, lld, today)
-                logging.info("%s\t| Updated" % (symbol))
+                logging.info("%9s| Updated" % (symbol))
         else:
-            logging.info("%s\t| No table found, creating and updating..." % (symbol))
+            logging.info("%9s| No table found:  Creating and updating..." % (symbol))
             init_tables(con, symbol)
             update_tables(con, symbol, the_beginning, today)
+    # otherwise the symbol doesn't exist in Yahoo's database
+    else:
+        logging.debug("%8s| No table found:  Symbol doesn't exist on Yahoo. Skipping..." % (symbol))
+
 
 def get_latest_local_date(con, symbol):
     symbol = symbol.upper()
@@ -70,11 +90,14 @@ def get_latest_local_date(con, symbol):
     cur.execute("SELECT * FROM %s_HIST WHERE oid = (SELECT MAX(oid) FROM %s_HIST)" % (symbol, symbol))
     return cur.fetchone()[0]
 
-def get_latest_remote_date(symbol="GOOG"):
+def get_latest_remote_date(symbol):
     # assumes that the most recent remote date will be in the last week
-    hist_data = ysq.get_historical_prices(symbol, last_week, today)
-    hist_data.pop(0)
-    return hist_data[0][0]
+    try:
+        hist_data = ysq.get_historical_prices(symbol, last_week, today)
+        hist_data.pop(0)
+        return hist_data[0][0]
+    except:
+        return ""
 
 def init_tables(con, symbol):
     cur = con.cursor()
@@ -108,3 +131,10 @@ def update_tables(con, symbol, sdate, edate):
     if not sdate == the_beginning:
         ta_data = ta_data[-update_count:]
     cur.executemany("INSERT INTO %s_TA VALUES(?, ?)" % (symbol), (ta_data))
+
+def internet_on():
+    try:
+        response = urllib2.urlopen('http://'+conn_test_ip, timeout=1)
+        return True
+    except urllib2.URLError as err: pass
+    return False
