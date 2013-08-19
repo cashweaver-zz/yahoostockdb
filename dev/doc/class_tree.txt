@@ -1,0 +1,4 @@
+stockpredictor
+    db
+        sqlmt
+    analysis

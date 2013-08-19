@@ -2,5 +2,10 @@
 # -*- coding: utf-8 -*-
 
 import sa.db as sadb
+import logbook
 
-sadb.update_db()
+#log = logbook.Logger('Logbook')
+log_handler = logbook.FileHandler('sa.log')
+
+with log_handler.applicationbound():
+    sadb.update_db()

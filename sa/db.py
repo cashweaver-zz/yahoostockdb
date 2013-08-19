@@ -2,14 +2,17 @@
 # -*- coding: utf-8 -*-
 
 import ta
-import sqlite3 as lite
+#import sqlite3 as lite
+from sqlite3 import dbapi2 as lite
 import ystockquote as ysq
 import datetime
-import logging
+import logbook
 import os
 import sys
 import configparser
 import urllib2
+import re
+import progressbar
 
 config = configparser.ConfigParser()
 config.read(os.getcwd()+"/config.ini")
@@ -17,8 +20,8 @@ symbol_list = config['DATABASE']['symbol_list']
 db_path = config['DATABASE']['db_path']
 conn_test_ip = config['DATABASE']['conn_test_ip']
 
-# set up logging
-logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
+# set up log
+log = logbook.Logger('Logbook')
 
 # get some dates
 now = datetime.datetime.now()
@@ -42,26 +45,40 @@ cols_ta = "Rsi14 REAL, " + \
 # for passing data between update_yahoo_data and update_ta_data
 update_count = 0
 
+
 def update_db(symbol_list=symbol_list, db_path=db_path):
-    logging.info("Checking for internet connection...")
+    log.info("Checking for internet connection...")
     if internet_on():
-        logging.info("Connection found. Continuing...")
+        log.info("Connection found. Continuing...")
         try:
-            logging.info("Updating database...")
-            logging.info("%7s| Status" % "Symbol")
-            logging.info("======================")
-            con = lite.connect(db_path)
+            #log.info("Updating database...")
+            con = lite.connect(":memory:")
             with con:
+                symbol_count = file_len(symbol_list)
+                pbar = progressbar.ProgressBar(
+                    widgets=['Updating database: ',
+                             progressbar.Bar('=', '[', ']'), ' ',
+                             progressbar.Percentage(), ' ',
+                             progressbar.ETA()],
+                    maxval = symbol_count).start()
+                cur_sym = 0
+                i = 0
                 for symbol in open(symbol_list, 'r').readlines():
-                    update_symbol(con, symbol.rstrip().upper(), db_path)
+                    pbar.update(i+1)
+                    i += 1
+                    # sterilize symbol: change all special chars into '_'
+                    symbol = sterilize_symbol(symbol)
+                    update_symbol(con, symbol, db_path)
+                    cur_sym += 1
         except lite.Error, e:
-            logging.critical("Error: %s: " % e.args[0])
+            log.critical("Error: %s: " % e.args[0])
             sys.exit(1)
         finally:
             if con:
                 con.close()
     else:
-        logging.critical("Could not connect to google.com via [74.125.113.99]. Conclusion:  You're not connected to the internet. Either that or google.com is down. 2013-08-17 Never Forget.")
+        log.critical("Could not connect to google.com via [%s]. Conclusion:  You're not connected to the internet. Either that or google.com is down. 2013-08-17 Never Forget." % conn_test_ip)
+        pass
 
 def update_symbol(con, symbol, db_path):
     lrd = get_latest_remote_date(symbol)
@@ -70,17 +87,24 @@ def update_symbol(con, symbol, db_path):
         if table_exists(con, symbol+"_HIST"):
             lld = get_latest_local_date(con, symbol)
             if lld == lrd:
-                logging.info("%9s| Up to date" % (symbol))
+                log.info("%7s| Up to date" % (symbol))
+                pass
             else:
                 update_tables(con, symbol, lld, today)
-                logging.info("%9s| Updated" % (symbol))
+                log.info("%7s| Updated" % (symbol))
         else:
-            logging.info("%9s| No table found:  Creating and updating..." % (symbol))
+            log.info("%7s| No table found:  Creating and updating..." % (symbol))
             init_tables(con, symbol)
             update_tables(con, symbol, the_beginning, today)
     # otherwise the symbol doesn't exist in Yahoo's database
+    elif table_exists(con, symbol+"_HIST"):
+        log.info("%7s| Symbol doesn't exist on Yahoo. Table found. Dropping..." % (symbol))
+        cur = con.cursor()
+        cur.execute("DROP TABLE IF EXISTS %s_HIST" % symbol)
+        cur.execute("DROP TABLE IF EXISTS %s_TA" % symbol)
     else:
-        logging.debug("%8s| No table found:  Symbol doesn't exist on Yahoo. Skipping..." % (symbol))
+        log.info("%7s| Symbol doesn't exist on Yahoo. No table found. Skipping..." % (symbol))
+        pass
 
 
 def get_latest_local_date(con, symbol):
@@ -105,6 +129,7 @@ def init_tables(con, symbol):
     cur.execute("CREATE TABLE %s_HIST(%s)" % (symbol, cols_hist))
     cur.execute("DROP TABLE IF EXISTS %s_TA" % symbol)
     cur.execute("CREATE TABLE %s_TA(%s)" % (symbol, cols_ta))
+    con.commit()
 
 def table_exists(con, t_name):
     """Check if table exists. Returns true/false"""
@@ -126,11 +151,16 @@ def update_tables(con, symbol, sdate, edate):
         hist_data.pop(0)
         update_count = len(hist_data)
     cur.executemany("INSERT INTO %s_HIST VALUES(?, ?, ?, ?, ?, ?, ?)" % (symbol), (hist_data))
+    con.commit()
 
     ta_data = ta.get_ta_data(con, symbol).tolist()
     if not sdate == the_beginning:
         ta_data = ta_data[-update_count:]
     cur.executemany("INSERT INTO %s_TA VALUES(?, ?)" % (symbol), (ta_data))
+    con.commit()
+
+def sterilize_symbol(symbol):
+    return re.sub('\.', '_', re.sub('[^a-zA-Z0-9]', '_', symbol.rstrip().upper()))
 
 def internet_on():
     try:
@@ -138,3 +168,9 @@ def internet_on():
         return True
     except urllib2.URLError as err: pass
     return False
+
+def file_len(fname):
+    with open(fname) as f:
+        for i, l in enumerate(f):
+            pass
+    return i + 1
