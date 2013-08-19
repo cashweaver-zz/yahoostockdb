@@ -81,6 +81,7 @@ def update_db(symbol_list=symbol_list, db_path=db_path):
         pass
 
 def update_symbol(con, symbol, db_path):
+    symbol = sterilize_symbol(symbol)
     lrd = get_latest_remote_date(symbol)
     # check that Yahoo has data for given symbol
     if not lrd == "":
@@ -105,7 +106,6 @@ def update_symbol(con, symbol, db_path):
     else:
         log.info("%7s| Symbol doesn't exist on Yahoo. No table found. Skipping..." % (symbol))
         pass
-
 
 def get_latest_local_date(con, symbol):
     symbol = symbol.upper()
@@ -160,7 +160,8 @@ def update_tables(con, symbol, sdate, edate):
     con.commit()
 
 def sterilize_symbol(symbol):
-    return re.sub('\.', '_', re.sub('[^a-zA-Z0-9]', '_', symbol.rstrip().upper()))
+    return re.sub('[^a-zA-Z0-9]', '_', symbol.rstrip().upper())
+
 
 def internet_on():
     try:

@@ -1,10 +1,13 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-import sa.mp_db as sadb
-import logbook
+import psp.mp_db as sadb
+import logbook, configparser, os
 
-log_handler = logbook.FileHandler('mp_sa.log')
+config = configparser.ConfigParser()
+config.read(os.getcwd()+"/config.ini")
+
+log_handler = logbook.FileHandler(config['DEBUG']['log_fpath'])
 
 with log_handler.applicationbound():
     sadb.mp_update_db()
