@@ -1,7 +1,7 @@
 stock_analyzer
 ==============
 
-Python based stock analysis
+Python based stock analysis. Abandoned in favor of a C++ implementation, because I like the pain.
 
 Installation
 ============
