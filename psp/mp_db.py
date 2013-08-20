@@ -25,36 +25,41 @@ def mp_update_db(symbol_list=symbol_list, db_path=db_path):
     log.info("Checking for internet connection...")
     if sadb.internet_on():
         log.info("Connection found. Continuing...")
+        procs = []
         try:
             log.info("Updating database...")
-            #con = lite.connect(db_path)
-            #with con:
-            nprocs = multiprocessing.cpu_count()
-            chunksize = int(math.ceil(sadb.file_len(symbol_list) / float(nprocs)))
-            status = multiprocessing.Queue()
-            progress = collections.OrderedDict()
-            procs = []
+            con = lite.connect(db_path)
+            with con:
+                nprocs = multiprocessing.cpu_count()
+                chunksize = int(math.ceil(sadb.file_len(symbol_list) / float(nprocs)))
+                status = multiprocessing.Queue()
+                progress = collections.OrderedDict()
+                all_syms = [i.strip() for i in open(symbol_list, 'r').readlines()]
 
-            all_syms = [i.strip() for i in open(symbol_list, 'r').readlines()]
+                for i in range(nprocs):
+                    syms = all_syms[chunksize * i:chunksize * (i + 1)]
+                    child = multiprocessing.Process(target=worker, args=[db_path, syms, i, status, con])
+                    progress[i] = 0.0
+                    child.start()
+                    procs.append(child)
+                    child.join()
 
-            for i in range(nprocs):
-                syms = all_syms[chunksize * i:chunksize * (i + 1)]
-                child = multiprocessing.Process(target=worker, args=[db_path, syms, i, status])
-                child.start()
-                procs.append(child)
-                progress[i] = 0.0
-
-            pbar_refresh_interval = float(config['DATABASE']['pbar_refresh_interval'])
-            while any(i.is_alive() for i in procs):
-                time.sleep(pbar_refresh_interval)
-                while not status.empty():
-                    proc_id, percent = status.get()
-                    progress[proc_id] = percent
-                    print_progress(progress)
-            print 'all downloads complete'
+                pbar_refresh_interval = float(config['DATABASE']['pbar_refresh_interval'])
+                while any(i.is_alive() for i in procs):
+                    time.sleep(pbar_refresh_interval)
+                    while not status.empty():
+                        proc_id, percent = status.get()
+                        progress[proc_id] = percent
+                        #print_progress(progress)
+                print 'all downloads complete'
 
         except lite.Error, e:
             log.critical("Error: %s: " % e.args[0])
+            log.critical("Closing all processses...")
+            for i, p in enumerate(procs):
+                p.join()
+                log.critical("Process %d closed." % i)
+
             sys.exit(1)
         finally:
             pass
@@ -64,12 +69,12 @@ def mp_update_db(symbol_list=symbol_list, db_path=db_path):
         log.critical("Could not connect to google.com via [%s]. Conclusion:  You're not connected to the internet. Either that or google.com is down. 2013-08-17 Never Forget." % conn_test_ip)
         pass
 
-def worker(db_path, syms, proc_id, status):
+def worker(db_path, syms, proc_id, status, con):
     """ The worker function, invoked in a process. 'syms' is a
         list of symbols to add to the database.
     """
     #con = lite.connect(db_path, check_same_thread=True)
-    con = lite.connect(db_path)
+    #con = lite.connect(db_path)
     count = len(syms)
     for i, s in enumerate(syms):
         status.put([proc_id, (i+1.0)/count])

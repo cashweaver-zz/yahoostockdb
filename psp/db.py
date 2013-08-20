@@ -81,7 +81,6 @@ def update_db(symbol_list=symbol_list, db_path=db_path):
         pass
 
 def update_symbol(con, symbol, db_path):
-    symbol = sterilize_symbol(symbol)
     lrd = get_latest_remote_date(symbol)
     # check that Yahoo has data for given symbol
     if not lrd == "":
@@ -124,6 +123,7 @@ def get_latest_remote_date(symbol):
         return ""
 
 def init_tables(con, symbol):
+    symbol = sterilize_symbol(symbol)
     cur = con.cursor()
     cur.execute("DROP TABLE IF EXISTS %s_HIST" % symbol)
     cur.execute("CREATE TABLE %s_HIST(%s)" % (symbol, cols_hist))
@@ -141,6 +141,7 @@ def update_tables(con, symbol, sdate, edate):
     update_count = 0
     cur = con.cursor()
     hist_data = ysq.get_historical_prices(symbol, sdate, edate)
+    symbol = sterilize_symbol(symbol)
     # remove the headers
     hist_data.pop(0)
     # reverse order is much simpler for generating the technical indicators
