@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import sqlite3 as lite
+import yahoostockdb.mpprogressbar.pbfmp as mppb
 import datetime, logbook, os, sys, configparser, multiprocessing, math, collections, time
 import db as sadb
 

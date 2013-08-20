@@ -1,0 +1,3 @@
+[submodule "mpprogressbar"]
+	path = mpprogressbar
+	url = git@github.com:DeusExVerbum/mpprogressbar.git
