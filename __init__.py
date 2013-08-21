@@ -6,8 +6,8 @@ import datetime, logbook, os, sys, configparser, math, time, collections, ta, ur
 from sqlite3 import dbapi2 as lite
 import multiprocessing as mp
 import ystockquote as ysq
-
 import progressbar
+
 
 config = configparser.ConfigParser()
 config.read(os.getcwd()+"/config.ini")
@@ -51,25 +51,107 @@ class Database(object):
                 log.info("Updating database...")
                 con = lite.connect(db_path)
                 with con:
+
+                    # Configuration Options
+                    #======================
+                    # Update interval in seconds
+                    # Numbers below 1 may result in flickering
+                    #pb_update_interval = 1
+                    # Message to be printed once all processes finish
+                    #end_msg =  'All processes complete!\n'
+                    # Prefix for all process names. Be sure to include a trailing space for
+                    # legibility
+                    #pname_prefix = "Process "
+                    # Header to be included above progress bars
+                    #header = "Running processes"
+                    # Number of processes
                     nprocs = mp.cpu_count()
-                    chunksize = int(math.ceil(self.file_len(symbol_list) / float(nprocs)))
-                    status = mp.Queue()
-                    progress = collections.OrderedDict()
+
+
+                    # Create dummy list and data
+                    #===========================
+                    #nums = []
+                    #nums.extend(range(1,49))
+                    # Split nums, as equally as can be done, into a list of lists: sub_nums
+                    #sub_nums = [nums[i*len(nums)//nprocs:(i+1)*len(nums)//nprocs] for i in range(nprocs)]
                     all_syms = [i.strip() for i in open(symbol_list, 'r').readlines()]
+                    sub_syms = [all_syms[i*len(all_syms)//nprocs:(i+1)*len(all_syms)//nprocs] for i in range(nprocs)]
+
+
+                    # Create overseer lists and dicts
+                    #================================
+                    # Dictionary to hold the current % of all processes,
+                    # indexed by pid
+                    pstatus = mp.Manager().dict()
+                    # Create list to hold all processes.
+                    procs = []
+                    # Create list to hold all progress bars.
+                    pbars = []
+
+
+                    # Create the global progress bar
+                    #===============================
+                    # Define progress bar in the same way you would with the regular
+                    # progressbar package.
+                    #   NOTE: maxval must equal the sum of maxvals for all processes
+                    pbars.append(mpprogressbar.ProgressBar(
+                        widgets=[
+                            'All Procs', ' ',
+                            mpprogressbar.Percentage(), ' ',
+                            mpprogressbar.Bar('#', '[', ']'), ' ',
+                            mpprogressbar.ETA()],
+                            maxval=len(all_syms)
+                        ).start())
+
+                    # Initialize status of the global process to 0%
+                    pstatus[0] = 0
+
+                    # Create a progress bar for each process
+                    #=======================================
                     for i in range(nprocs):
-                        syms = all_syms[chunksize * i:chunksize * (i + 1)]
-                        child = mp.Process(target=self.worker, args=[db_path, syms, i, status, con])
-                        progress[i] = 0.0
-                        child.start()
+                        # Maximum value of the progress bar. Defined within the loop because
+                        # this number should be equal to the operation count of the given
+                        # process, which may not be equal for all processes.
+                        pb_maxval = len(sub_nums[i])
+
+                        # Initialize status of the current process to 0%
+                        # pid = i+1 because 0 is reserved for the global progress bar
+                        pstatus[i+1] = 0
+
+                        # Define progress bar in the same way you would with the regular
+                        # progressbar package
+                        pbars.append(mpprogressbar.ProgressBar(
+                            widgets=[
+                                (config['DATABASE']['pb_proc_prefix'] + ' ' + str(i+1)), ' ',
+                                mpprogressbar.Percentage(), ' ',
+                                mpprogressbar.Bar('-', '[', ']'), ' ',
+                                mpprogressbar.ETA()],
+                                maxval=pb_maxval
+                            ).start())
+
+
+                        # Initialize the new process
+                        #   target: function to be run by the process
+                        #   args: list of arguments the function requires
+                        child = mp.Process(
+                            target=self.worker,
+                            args=[db_path, sub_syms[i], i, status, con])
+
+                        # Add child to procs so we can keep track of it
                         procs.append(child)
-                    pbar_refresh_interval = float(config['DATABASE']['pbar_refresh_interval'])
-                    while any(i.is_alive() for i in procs):
-                        time.sleep(pbar_refresh_interval)
-                        while not status.empty():
-                            proc_id, percent = status.get()
-                            progress[proc_id] = percent
-                            #print_progress(progress)
-                    print 'all downloads complete'
+
+                        # Start the process
+                        child.start()
+
+                    # Prints progress bars while any one is still alive, then prints the end_msg
+                    print_progressbars(
+                        pstatus,
+                        procs,
+                        pbars,
+                        config['DATABASE']['pb_header'],
+                        config['DATABASE']['pb_refresh_interval'],
+                        config['DATABASE']['pb_complete_msg']
+                        )
             except lite.Error, e:
                 log.critical("Error: %s: " % e.args[0])
                 log.critical("Closing all processses...")
@@ -86,30 +168,48 @@ class Database(object):
             log.critical("Could not connect to google.com via [%s]. Conclusion:  You're not connected to the internet. Either that or google.com is down. 2013-08-17 Never Forget." % conn_test_ip)
             pass
 
+    #args=[db_path, sub_syms[i], i, status, con])
 
-    def worker(self, db_path, syms, pid, status, con):
-        """ The worker function, invoked in a process. 'syms' is a
-            list of symbols to add to the database.
+    def do_stuff(sub_syms, pstatus, pid, pb_maxval):
         """
-        count = len(syms)
-        for i, s in enumerate(syms):
-            status.put([pid, (i+1.0)/count])
-            self.update_symbol(con, s, db_path)
+        Pretends to do work so we can see mpprogressbar in action.
+        """
+        for s in sub_syms:
+            ##########
+            # Do stuff
+            self.update_symbol(con, s)
+            # Done doing things
+            ###################
+            # update progress bar for this process
+            pstatus[pid] += 1
+            # update the global progress bar
+            pstatus[0] += 1
 
 
-    def print_progress(self, progress):
-        sys.stdout.write('\033[2J\033[H') #clear screen
-        pbar_width = int(config['DATABASE']['pbar_width'])
-        for proc_id, percent in progress.items():
-            bar = ('=' * int(percent * pbar_width)).ljust(pbar_width)
-            percent = int(percent * 100)
-            sys.stdout.write("%s [%s] %s%%\n" % ("Process %s" % proc_id, bar, percent))
-        sys.stdout.flush()
+        #def worker(self, db_path, syms, pid, status, con):
+            """ The worker function, invoked in a process. 'syms' is a
+                list of symbols to add to the database.
+            """
+            #count = len(syms)
+            #for i, s in enumerate(syms):
+                #status.put([pid, (i+1.0)/count])
+                #self.update_symbol(con, s, db_path)
+
+
+        #def print_progress(self, progress):
+            #sys.stdout.write('\033[2J\033[H') #clear screen
+            #pbar_width = int(config['DATABASE']['pbar_width'])
+            #for proc_id, percent in progress.items():
+                #bar = ('=' * int(percent * pbar_width)).ljust(pbar_width)
+                #percent = int(percent * 100)
+                #sys.stdout.write("%s [%s] %s%%\n" % ("Process %s" % proc_id, bar, percent))
+            #sys.stdout.flush()
 
 
 
-    # for passing data between update_yahoo_data and update_ta_data
-    update_count = 0
+        # for passing data between update_yahoo_data and update_ta_data
+        update_count = 0
+
 
 
     def update_db(self, symbol_list=symbol_list, db_path=db_path):
@@ -147,7 +247,8 @@ class Database(object):
             pass
 
 
-    def update_symbol(self, con, symbol, db_path):
+    def update_symbol(self, con, symbol):
+        db_path = config['DATABASE']['db_path']
         lrd = self.get_latest_remote_date(symbol)
         # check that Yahoo has data for given symbol
         if not lrd == "":
