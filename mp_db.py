@@ -1,9 +1,9 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
+import datetime, logbook, os, sys, configparser, math, time, collections
 import sqlite3 as lite
-import yahoostockdb.mpprogressbar.pbfmp as mppb
-import datetime, logbook, os, sys, configparser, multiprocessing, math, collections, time
+import multiprocessing as mp
 import db as sadb
 
 config = configparser.ConfigParser()
@@ -31,20 +31,17 @@ def mp_update_db(symbol_list=symbol_list, db_path=db_path):
             log.info("Updating database...")
             con = lite.connect(db_path)
             with con:
-                nprocs = multiprocessing.cpu_count()
+                nprocs = mp.cpu_count()
                 chunksize = int(math.ceil(sadb.file_len(symbol_list) / float(nprocs)))
-                status = multiprocessing.Queue()
+                status = mp.Queue()
                 progress = collections.OrderedDict()
                 all_syms = [i.strip() for i in open(symbol_list, 'r').readlines()]
-
                 for i in range(nprocs):
                     syms = all_syms[chunksize * i:chunksize * (i + 1)]
-                    child = multiprocessing.Process(target=worker, args=[db_path, syms, i, status, con])
+                    child = mp.Process(target=worker, args=[db_path, syms, i, status, con])
                     progress[i] = 0.0
                     child.start()
                     procs.append(child)
-                    child.join()
-
                 pbar_refresh_interval = float(config['DATABASE']['pbar_refresh_interval'])
                 while any(i.is_alive() for i in procs):
                     time.sleep(pbar_refresh_interval)
@@ -53,7 +50,6 @@ def mp_update_db(symbol_list=symbol_list, db_path=db_path):
                         progress[proc_id] = percent
                         #print_progress(progress)
                 print 'all downloads complete'
-
         except lite.Error, e:
             log.critical("Error: %s: " % e.args[0])
             log.critical("Closing all processses...")
@@ -70,15 +66,13 @@ def mp_update_db(symbol_list=symbol_list, db_path=db_path):
         log.critical("Could not connect to google.com via [%s]. Conclusion:  You're not connected to the internet. Either that or google.com is down. 2013-08-17 Never Forget." % conn_test_ip)
         pass
 
-def worker(db_path, syms, proc_id, status, con):
+def worker(db_path, syms, pid, status, con):
     """ The worker function, invoked in a process. 'syms' is a
         list of symbols to add to the database.
     """
-    #con = lite.connect(db_path, check_same_thread=True)
-    #con = lite.connect(db_path)
     count = len(syms)
     for i, s in enumerate(syms):
-        status.put([proc_id, (i+1.0)/count])
+        status.put([pid, (i+1.0)/count])
         sadb.update_symbol(con, s, db_path)
 
 def print_progress(progress):
