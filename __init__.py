@@ -1,12 +1,20 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-import datetime, logbook, os, sys, configparser, math, time, collections, ta, urllib2, re
+import datetime
+import logbook
+import os
+import sys
+import configparser
+import ta
+import urllib2
+import re
+import time
 #import sqlite3 as lite
 from sqlite3 import dbapi2 as lite
 import multiprocessing as mp
 import ystockquote as ysq
-import progressbar
+import mpprogressbar
 
 
 config = configparser.ConfigParser()
@@ -106,27 +114,30 @@ class Database(object):
                     # Initialize status of the global process to 0%
                     pstatus[0] = 0
 
+
+                    print "ABOUT TO ENTER PROC CREATING FOR LOOP"
                     # Create a progress bar for each process
                     #=======================================
                     for i in range(nprocs):
                         # Maximum value of the progress bar. Defined within the loop because
                         # this number should be equal to the operation count of the given
                         # process, which may not be equal for all processes.
-                        pb_maxval = len(sub_nums[i])
+                        #pb_maxval = len(sub_syms[i])
 
-                        # Initialize status of the current process to 0%
                         # pid = i+1 because 0 is reserved for the global progress bar
-                        pstatus[i+1] = 0
+                        pid = i + 1
+                        # Initialize status of the current process to 0%
+                        pstatus[pid] = 0
 
                         # Define progress bar in the same way you would with the regular
                         # progressbar package
                         pbars.append(mpprogressbar.ProgressBar(
                             widgets=[
-                                (config['DATABASE']['pb_proc_prefix'] + ' ' + str(i+1)), ' ',
+                                ('Process ' + str(pid)), ' ',
                                 mpprogressbar.Percentage(), ' ',
                                 mpprogressbar.Bar('-', '[', ']'), ' ',
                                 mpprogressbar.ETA()],
-                                maxval=pb_maxval
+                                maxval=len(sub_syms[i])
                             ).start())
 
 
@@ -134,8 +145,8 @@ class Database(object):
                         #   target: function to be run by the process
                         #   args: list of arguments the function requires
                         child = mp.Process(
-                            target=self.worker,
-                            args=[db_path, sub_syms[i], i, status, con])
+                            target=self.do_stuff,
+                            args=[sub_syms[i], pstatus, pid, con])
 
                         # Add child to procs so we can keep track of it
                         procs.append(child)
@@ -144,13 +155,10 @@ class Database(object):
                         child.start()
 
                     # Prints progress bars while any one is still alive, then prints the end_msg
-                    print_progressbars(
+                    self.print_progressbars(
                         pstatus,
                         procs,
-                        pbars,
-                        config['DATABASE']['pb_header'],
-                        config['DATABASE']['pb_refresh_interval'],
-                        config['DATABASE']['pb_complete_msg']
+                        pbars
                         )
             except lite.Error, e:
                 log.critical("Error: %s: " % e.args[0])
@@ -168,87 +176,80 @@ class Database(object):
             log.critical("Could not connect to google.com via [%s]. Conclusion:  You're not connected to the internet. Either that or google.com is down. 2013-08-17 Never Forget." % conn_test_ip)
             pass
 
-    #args=[db_path, sub_syms[i], i, status, con])
-
-    def do_stuff(sub_syms, pstatus, pid, pb_maxval):
+    def do_stuff(self, sub_syms, pstatus, pid, con):
         """
         Pretends to do work so we can see mpprogressbar in action.
         """
         for s in sub_syms:
-            ##########
-            # Do stuff
             self.update_symbol(con, s)
-            # Done doing things
-            ###################
             # update progress bar for this process
+            #print "proc_" + str(pid) + ": updated!"
             pstatus[pid] += 1
             # update the global progress bar
             pstatus[0] += 1
 
+    def print_progressbars(self, pstatus, procs, pbars):
+        """
+        Print all progress bars while any one is still running. Then print the
+        end_msg
+        """
+        header_msg = config['DATABASE']['pb_header']
+        pb_refresh_interval = float(config['DATABASE']['pb_refresh_interval'])
+        # Immediately clear the screen and print our header.
+        # Without this, if the pb_update_interval is relatively long, the script
+        # will appear to 'hang', even though it is running properly.
+        sys.stderr.write('\033[2J\033[H') # clear screen
+        print header_msg
 
-        #def worker(self, db_path, syms, pid, status, con):
-            """ The worker function, invoked in a process. 'syms' is a
-                list of symbols to add to the database.
-            """
-            #count = len(syms)
-            #for i, s in enumerate(syms):
-                #status.put([pid, (i+1.0)/count])
-                #self.update_symbol(con, s, db_path)
-
-
-        #def print_progress(self, progress):
-            #sys.stdout.write('\033[2J\033[H') #clear screen
-            #pbar_width = int(config['DATABASE']['pbar_width'])
-            #for proc_id, percent in progress.items():
-                #bar = ('=' * int(percent * pbar_width)).ljust(pbar_width)
-                #percent = int(percent * 100)
-                #sys.stdout.write("%s [%s] %s%%\n" % ("Process %s" % proc_id, bar, percent))
-            #sys.stdout.flush()
-
-
-
-        # for passing data between update_yahoo_data and update_ta_data
-        update_count = 0
-
+        # Continually update all progress bars so long as any one is still alive
+        while any(p.is_alive() for p in procs):
+            time.sleep(pb_refresh_interval)
+            sys.stderr.write('\033[2J\033[H') # clear screen
+            print header_msg
+            # progressbar handles the actual printing of progress bars
+            for i, pbar in enumerate(pbars):
+                # progressbar prints the bar each time update() is called
+                pbar.update(pstatus[i])
+        print config['DATABASE']['pb_complete_msg']
 
 
-    def update_db(self, symbol_list=symbol_list, db_path=db_path):
-        log.info("Checking for internet connection...")
-        if self.internet_on():
-            log.info("Connection found. Continuing...")
-            try:
-                #log.info("Updating database...")
-                con = lite.connect(":memory:")
-                with con:
-                    symbol_count = self.file_len(symbol_list)
-                    pbar = progressbar.ProgressBar(
-                        widgets=['Updating database: ',
-                                progressbar.Bar('=', '[', ']'), ' ',
-                                progressbar.Percentage(), ' ',
-                                progressbar.ETA()],
-                        maxval = symbol_count).start()
-                    cur_sym = 0
-                    i = 0
-                    for symbol in open(symbol_list, 'r').readlines():
-                        pbar.update(i+1)
-                        i += 1
-                        # sterilize symbol: change all special chars into '_'
-                        symbol = self.sterilize_symbol(symbol)
-                        self.update_symbol(con, symbol, db_path)
-                        cur_sym += 1
-            except lite.Error, e:
-                log.critical("Error: %s: " % e.args[0])
-                sys.exit(1)
-            finally:
-                if con:
-                    con.close()
-        else:
-            log.critical("Could not connect to google.com via [%s]. Conclusion:  You're not connected to the internet. Either that or google.com is down. 2013-08-17 Never Forget." % conn_test_ip)
-            pass
+    #def update_db(self, symbol_list=symbol_list, db_path=db_path):
+        #log.info("Checking for internet connection...")
+        #if self.internet_on():
+            #log.info("Connection found. Continuing...")
+            #try:
+                ##log.info("Updating database...")
+                #con = lite.connect(":memory:")
+                #with con:
+                    #symbol_count = self.file_len(symbol_list)
+                    #pbar = progressbar.ProgressBar(
+                        #widgets=['Updating database: ',
+                                #progressbar.Bar('=', '[', ']'), ' ',
+                                #progressbar.Percentage(), ' ',
+                                #progressbar.ETA()],
+                        #maxval = symbol_count).start()
+                    #cur_sym = 0
+                    #i = 0
+                    #for symbol in open(symbol_list, 'r').readlines():
+                        #pbar.update(i+1)
+                        #i += 1
+                        ## sterilize symbol: change all special chars into '_'
+                        #symbol = self.sterilize_symbol(symbol)
+                        #self.update_symbol(con, symbol, db_path)
+                        #cur_sym += 1
+            #except lite.Error, e:
+                #log.critical("Error: %s: " % e.args[0])
+                #sys.exit(1)
+            #finally:
+                #if con:
+                    #con.close()
+        #else:
+            #log.critical("Could not connect to google.com via [%s]. Conclusion:  You're not connected to the internet. Either that or google.com is down. 2013-08-17 Never Forget." % conn_test_ip)
+            #pass
 
 
     def update_symbol(self, con, symbol):
-        db_path = config['DATABASE']['db_path']
+        #db_path = config['DATABASE']['db_path']
         lrd = self.get_latest_remote_date(symbol)
         # check that Yahoo has data for given symbol
         if not lrd == "":
