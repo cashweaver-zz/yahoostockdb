@@ -76,7 +76,7 @@ class Database(object):
                     all_syms = self._get_all_table_names(cursor)
                     all_syms_and_lld = []
                     for s in all_syms:
-                        all_syms_and_lld.append([s, self.get_latest_local_date(cursor, s)])
+                        all_syms_and_lld.append([s, self._get_latest_local_date(cursor, s)])
                     sub_syms = [all_syms_and_lld[i*len(all_syms_and_lld)//nprocs:(i+1)*len(all_syms_and_lld)//nprocs]
                                 for i in range(nprocs)]
 
@@ -94,21 +94,11 @@ class Database(object):
                     pstatus[0] = 0
                     for i in range(nprocs):
                         pid = i + 1
-                        #log.info("Creating process %d/%d" % (pid, nprocs))
                         child = mp.Process(
                             target=self._update_producer,
                             args=[sub_syms[i], hist_data_q, pstatus, pid])
                         producers.append(child)
                         child.start()
-
-                    #while any(p.is_alive() for p in producers):
-                        #symbol, lrd, hist_data = hist_data_q.get()
-                        #symbol = self.sterilize_symbol(symbol)
-                        #self._drop_tables(cursor, symbol)
-                        #self._create_tables(cursor, symbol)
-                        #self._insert_tables(cursor, symbol, hist_data, 'ta_data placeholder')
-                        #pbar.update(pstatus[0])
-
 
                     while any(p.is_alive() for p in producers):
                         try:
@@ -120,13 +110,13 @@ class Database(object):
                             log.info("Updating: %s" % (symbol))
                             if not hist_data:
                                 pass
-                                #log.info("Already up-to-date: %s" % (symbol))
+                                log.info("Already up-to-date: %s" % (symbol))
                             elif lrd > last_week:
-                                #log.info("Updating: %s" % (symbol))
+                                log.info("Updating: %s" % (symbol))
                                 cursor.execute("DROP TABLE IF EXISTS %s_TA" % (symbol))
                                 self._insert_tables(cursor, symbol, hist_data, ta.get_ta_data(hist_data))
                             else:
-                                #log.info("Remote data more than a week old. Dropping tables: %s" % (symbol))
+                                log.info("Remote data more than a week old. Dropping tables: %s" % (symbol))
                                 self._drop_tables(cursor, symbol)
                         except:
                             pass
@@ -155,12 +145,10 @@ class Database(object):
                          2013-08-17 Never Forget." % config['DATABASE']['conn_test_ip'])
 
     def _update_producer(self, sub_syms, q, pstatus, pid):
-        #log.info("Process %02d starting" % (pid))
-        #i = 0
+        log.info("Process %02d starting" % (pid))
         for s in sub_syms:
             sym, lld = s
             try:
-                #log.info("Process %02d doing things" % (pid))
                 hist_data = ysq.get_historical_prices(sym, lld, today)
                 # remove header
                 hist_data.pop(0)
@@ -171,11 +159,8 @@ class Database(object):
                 hist_data.pop(0)
                 q.put((sym, lrd, hist_data))
             except:
-                pass
-                #log.info("Process %02d exception!" % (pid))
-            #i += 1
-            #print "%02d (%d/%d)" % (pid, i, len(sub_syms))
-        #log.info("Process %02d finished" % (pid))
+                log.info("Could not download data for %s" % s)
+        log.info("Process %02d finished" % (pid))
 
     def init_db(self):
         print "init_db() deletes your existing database and downloads fresh data."
@@ -269,7 +254,7 @@ class Database(object):
                          2013-08-17 Never Forget." % config['DATABASE']['conn_test_ip'])
 
     def _init_producer(self, sub_syms, q, pstatus, pid):
-        #log.info("Process %02d starting" % (pid))
+        log.info("Process %02d starting" % (pid))
         for s in sub_syms:
             try:
                 hist_data = ysq.get_historical_prices(s, the_beginning, today)
@@ -281,30 +266,8 @@ class Database(object):
                 ta_data = ta.get_ta_data(hist_data)
                 q.put((s, lrd, hist_data, ta_data))
             except:
-                pass
-                #log.info("Process %02d exception!" % (pid))
+                log.info("Could not download data for %s" % s)
         log.info("Process %02d finished" % (pid))
-
-
-
-
-    def _producer(self, sub_syms, q, pstatus, pid):
-        log.info("Process %02d starting" % (pid))
-        for s in sub_syms:
-            try:
-                hist_data = ysq.get_historical_prices(s, the_beginning, today)
-                # remove header
-                hist_data.pop(0)
-                lrd = hist_data[0][0]
-                # reverse order, so oldest are at top
-                hist_data.reverse()
-                q.put((s, lrd, hist_data))
-                pstatus[0] += 1
-            except:
-                log.info("Process %02d exception!" % (pid))
-                pass
-        log.info("Process %02d finished" % (pid))
-
 
     def _drop_tables(self, cursor, symbol):
         #log.info("Dropping tables: %s" % (symbol))
@@ -323,223 +286,24 @@ class Database(object):
         cursor.executemany("INSERT INTO %s_TA VALUES(?, ?)" % (symbol), (ta_data))
 
 
-    def print_progressbars(self, pstatus, procs, pbars):
-        """
-        Desc
-
-        @type: number
-        @param: the_parameter
-
-        @rtype: number
-        @return: A_number
-        """
-        """
-        Print all progress bars while any one is still running.
-        """
-        header_msg = config['DATABASE']['pb_header']
-        pb_refresh_interval = float(config['DATABASE']['pb_refresh_interval'])
-        # Immediately clear the screen and print our header.
-        # Without this, if the pb_update_interval is relatively long, the script
-        # will appear to 'hang', even though it is running properly.
-        sys.stderr.write('\033[2J\033[H') # clear screen
-        print header_msg
-
-        # Continually update all progress bars so long as any one is still alive
-        while any(p.is_alive() for p in procs):
-            time.sleep(pb_refresh_interval)
-            sys.stderr.write('\033[2J\033[H') # clear screen
-            print header_msg
-            # progressbar handles the actual printing of progress bars
-            for i, pbar in enumerate(pbars):
-                # progressbar prints the bar each time update() is called
-                pbar.update(pstatus[i])
-        print config['DATABASE']['pb_complete_msg']
-
-
-    def update_symbol(self, con, symbol):
-        """
-        Desc
-
-        @type: number
-        @param: the_parameter
-
-        @rtype: number
-        @return: A_number
-        """
-        lrd = self.get_latest_remote_date(symbol)
-        # check that Yahoo has data for given symbol
-        if not lrd == "":
-            if self.table_exists(con, symbol+"_HIST"):
-                lld = self.get_latest_local_date(con, symbol)
-                if lld == lrd:
-                    log.info("%7s| Up to date" % (symbol))
-                    pass
-                else:
-                    self.update_tables(con, symbol, lld, today)
-                    log.info("%7s| Updated" % (symbol))
-            else:
-                log.info("%7s| No table found:  Creating and updating..." % (symbol))
-                self.init_tables(con, symbol)
-                self.update_tables(con, symbol, the_beginning, today)
-        # otherwise the symbol doesn't exist in Yahoo's database
-        elif self.table_exists(con, symbol+"_HIST"):
-            log.info("%7s| Symbol doesn't exist on Yahoo. Table found. Dropping..." % (symbol))
-            cur = con.cursor()
-            cur.execute("DROP TABLE IF EXISTS %s_HIST" % symbol)
-            cur.execute("DROP TABLE IF EXISTS %s_TA" % symbol)
-        else:
-            log.info("%7s| Symbol doesn't exist on Yahoo. No table found. Skipping..." % (symbol))
-            pass
-
-
-    def get_latest_local_date(self, cursor, symbol):
-        """
-        Desc
-
-        @type: number
-        @param: the_parameter
-
-        @rtype: number
-        @return: A_number
-        """
+    def _get_latest_local_date(self, cursor, symbol):
         symbol = symbol.upper()
-        # ensure connection to db
         cursor.execute("SELECT * FROM %s_HIST WHERE oid = (SELECT MAX(oid) FROM %s_HIST)" % (symbol, symbol))
         return cursor.fetchone()[0]
 
 
-    def get_latest_remote_date(self, symbol):
-        """
-        Desc
-
-        @type: number
-        @param: the_parameter
-
-        @rtype: number
-        @return: A_number
-        """
-        # assumes that the most recent remote date will be in the last week
-        try:
-            hist_data = ysq.get_historical_prices(symbol, last_week, today)
-            hist_data.pop(0)
-            return hist_data[0][0]
-        except:
-            return ""
-
-
-    def init_tables(self, con, symbol):
-        """
-        Desc
-
-        @type: number
-        @param: the_parameter
-
-        @rtype: number
-        @return: A_number
-        """
-        symbol = self.sterilize_symbol(symbol)
-        cur = con.cursor()
-        cur.execute("DROP TABLE IF EXISTS %s_HIST" % symbol)
-        cur.execute("CREATE TABLE %s_HIST(%s)" % (symbol, cols_hist))
-        cur.execute("DROP TABLE IF EXISTS %s_TA" % symbol)
-        cur.execute("CREATE TABLE %s_TA(%s)" % (symbol, cols_ta))
-        con.commit()
-
-
-    def table_exists(self, cursor, t_name):
-        """
-        Desc
-
-        @type: number
-        @param: the_parameter
-
-        @rtype: number
-        @return: A_number
-        """
-        """
-        Check if table exists.
-
-        @rtype: bool
-        @return: True, if the table exists, else false.
-        """
+    def _table_exists(self, cursor, t_name):
         cursor.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='%s'" % (t_name))
         return cursor.fetchone()
 
 
-    def update_tables(self, con, symbol, sdate, edate):
-        """
-        Desc
-
-        @type: number
-        @param: the_parameter
-
-        @rtype: number
-        @return: A_number
-        """
-        update_count = 0
-        cur = con.cursor()
-        hist_data = ysq.get_historical_prices(symbol, sdate, edate)
-        symbol = self.sterilize_symbol(symbol)
-        # remove the headers
-        hist_data.pop(0)
-        # reverse order is much simpler for generating the technical indicators
-        hist_data.reverse()
-        if not sdate == the_beginning:
-            # hist_data includes data from lld, which we already have
-            # it's the oldest data, so we can pop it off the top
-            hist_data.pop(0)
-            update_count = len(hist_data)
-        cur.executemany("INSERT INTO %s_HIST VALUES(?, ?, ?, ?, ?, ?, ?)" % (symbol), (hist_data))
-        con.commit()
-
-        ta_data = ta.get_ta_data(con, symbol).tolist()
-        if not sdate == the_beginning:
-            ta_data = ta_data[-update_count:]
-        cur.executemany("INSERT INTO %s_TA VALUES(?, ?)" % (symbol), (ta_data))
-        con.commit()
-
-
     def sterilize_symbol(self, symbol):
-        """
-        Desc
-
-        @type: number
-        @param: the_parameter
-
-        @rtype: number
-        @return: A_number
-        """
         return re.sub('[^a-zA-Z0-9]', '_', symbol.rstrip().upper())
 
 
     def internet_on(self):
-        """
-        Desc
-
-        @type: number
-        @param: the_parameter
-
-        @rtype: number
-        @return: A_number
-        """
         try:
             urllib2.urlopen('http://'+config['DATABASE']['conn_test_ip'], timeout=1)
             return True
         except urllib2.URLError: pass
         return False
-
-
-    def file_len(self, fname):
-        """
-        Returns the length of a file
-
-        @type: string
-        @param: Name of the file to be checked.
-
-        @rtype: number
-        @return: A_number
-        """
-        with open(fname) as f:
-            for i, l in enumerate(f):
-                pass
-        return i + 1
