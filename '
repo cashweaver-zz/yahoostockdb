@@ -222,18 +222,14 @@ class Database(object):
                         child.start()
 
                     while any(p.is_alive() for p in producers):
-                        log.info("qsize%03d" % (hist_data_q.qsize()))
-                        try:
-                            symbol, lrd, hist_data = hist_data_q.get(timeout=5)
-                            symbol = self.sterilize_symbol(symbol)
-                            #log.info("Dropping tables: %s" % (symbol))
-                            self._drop_tables(cursor, symbol)
-                            #log.info("Creating tables: %s" % (symbol))
-                            self._create_tables(cursor, symbol)
-                            #log.info("Inserting into tables: %s" % (symbol))
-                            self._insert_tables(cursor, symbol, hist_data, 'ta_data placeholder')
-                        except:
-                            pass
+                        symbol, lrd, hist_data = hist_data_q.get(timeout=5)
+                        symbol = self.sterilize_symbol(symbol)
+                        #log.info("Dropping tables: %s" % (symbol))
+                        self._drop_tables(cursor, symbol)
+                        #log.info("Creating tables: %s" % (symbol))
+                        self._create_tables(cursor, symbol)
+                        #log.info("Inserting into tables: %s" % (symbol))
+                        self._insert_tables(cursor, symbol, hist_data, 'ta_data placeholder')
                         pbar.update(pstatus[0])
 
                     log.info("Update complete.")
