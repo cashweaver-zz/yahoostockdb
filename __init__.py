@@ -111,16 +111,13 @@ class Database(object):
 
 
                     while any(p.is_alive() for p in producers):
-                        #for pid, p in enumerate(producers):
-                            #if p.is_alive():
-                                #print "<<<PID: %d>>>" % (pid + 1)
-                        #print "[[[%d/%d]]]" % (pstatus[0], len(all_syms))
-
                         try:
                             symbol, lrd, hist_data = hist_data_q.get(timeout=5)
+                            pstatus[0] += 1
                             symbol = self.sterilize_symbol(symbol)
                             lrd = time.strptime(lrd, "%Y-%m-%d")
 
+                            log.info("Updating: %s" % (symbol))
                             if not hist_data:
                                 pass
                                 #log.info("Already up-to-date: %s" % (symbol))
@@ -161,7 +158,6 @@ class Database(object):
         #i = 0
         for s in sub_syms:
             sym, lld = s
-            pstatus[0] += 1
             try:
                 #log.info("Process %02d doing things" % (pid))
                 hist_data = ysq.get_historical_prices(sym, lld, today)
@@ -181,6 +177,14 @@ class Database(object):
         #log.info("Process %02d finished" % (pid))
 
     def init_db(self):
+        print "init_db() deletes your existing database and downloads fresh data."
+        print "Delete your existing database:"
+        print "%s" % config['DATABASE']['db_path']
+        uinput = raw_input("and continue? [y/N] ")
+        if not uinput == 'y':
+            print "Exiting."
+            sys.exit(1)
+        os.remove(config['DATABASE']['db_path'])
         log.info("Checking for internet connection...")
         if self.internet_on():
             log.info("Connection found. Continuing...")
@@ -222,12 +226,12 @@ class Database(object):
                         child.start()
 
                     while any(p.is_alive() for p in producers):
-                        log.info("qsize%03d" % (hist_data_q.qsize()))
                         try:
                             symbol, lrd, hist_data = hist_data_q.get(timeout=5)
+                            pstatus[0] += 1
                             symbol = self.sterilize_symbol(symbol)
-                            #log.info("Dropping tables: %s" % (symbol))
-                            self._drop_tables(cursor, symbol)
+                            log.info("Initializing: %s" % (symbol))
+                            #self._drop_tables(cursor, symbol)
                             #log.info("Creating tables: %s" % (symbol))
                             self._create_tables(cursor, symbol)
                             #log.info("Inserting into tables: %s" % (symbol))
@@ -261,7 +265,6 @@ class Database(object):
     def _init_producer(self, sub_syms, q, pstatus, pid):
         #log.info("Process %02d starting" % (pid))
         for s in sub_syms:
-            pstatus[0] += 1
             try:
                 hist_data = ysq.get_historical_prices(s, the_beginning, today)
                 # remove header
