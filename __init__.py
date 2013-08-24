@@ -123,7 +123,8 @@ class Database(object):
                                 #log.info("Already up-to-date: %s" % (symbol))
                             elif lrd > last_week:
                                 #log.info("Updating: %s" % (symbol))
-                                self._insert_tables(cursor, symbol, hist_data, 'ta_data placeholder')
+                                cursor.execute("DROP TABLE IF EXISTS %s_TA" % (symbol))
+                                self._insert_tables(cursor, symbol, hist_data, ta.get_ta_data(hist_data))
                             else:
                                 #log.info("Remote data more than a week old. Dropping tables: %s" % (symbol))
                                 self._drop_tables(cursor, symbol)
@@ -184,7 +185,12 @@ class Database(object):
         if not uinput == 'y':
             print "Exiting."
             sys.exit(1)
-        os.remove(config['DATABASE']['db_path'])
+        try:
+            os.remove(config['DATABASE']['db_path'])
+            log.info("Database deleted.")
+        except:
+            log.info("No database found by given name. Continuing.")
+
         log.info("Checking for internet connection...")
         if self.internet_on():
             log.info("Connection found. Continuing...")
@@ -227,7 +233,7 @@ class Database(object):
 
                     while any(p.is_alive() for p in producers):
                         try:
-                            symbol, lrd, hist_data = hist_data_q.get(timeout=5)
+                            symbol, lrd, hist_data, ta_data = hist_data_q.get(timeout=5)
                             pstatus[0] += 1
                             symbol = self.sterilize_symbol(symbol)
                             log.info("Initializing: %s" % (symbol))
@@ -235,7 +241,7 @@ class Database(object):
                             #log.info("Creating tables: %s" % (symbol))
                             self._create_tables(cursor, symbol)
                             #log.info("Inserting into tables: %s" % (symbol))
-                            self._insert_tables(cursor, symbol, hist_data, 'ta_data placeholder')
+                            self._insert_tables(cursor, symbol, hist_data, ta_data)
                         except:
                             pass
                         pbar.update(pstatus[0])
@@ -272,7 +278,8 @@ class Database(object):
                 lrd = hist_data[0][0]
                 # reverse order, so oldest are at top
                 hist_data.reverse()
-                q.put((s, lrd, hist_data))
+                ta_data = ta.get_ta_data(hist_data)
+                q.put((s, lrd, hist_data, ta_data))
             except:
                 pass
                 #log.info("Process %02d exception!" % (pid))
@@ -313,7 +320,7 @@ class Database(object):
     def _insert_tables(self, cursor, symbol, hist_data, ta_data):
         #log.info("Inserting into tables: %s" % (symbol))
         cursor.executemany("INSERT INTO %s_HIST VALUES(?, ?, ?, ?, ?, ?, ?)" % (symbol), (hist_data))
-        #cursor.executemany("INSERT INTO %s_TA VALUES(?, ?)" % (symbol), (ta_data))
+        cursor.executemany("INSERT INTO %s_TA VALUES(?, ?)" % (symbol), (ta_data))
 
 
     def print_progressbars(self, pstatus, procs, pbars):
